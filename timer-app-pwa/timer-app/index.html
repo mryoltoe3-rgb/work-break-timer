@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#14141a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Work/Break Timer">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <title>Work/Break Timer</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #14141a;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      color: #f2f2f5;
+    }
+    .card {
+      background: #1e1e26;
+      border-radius: 16px;
+      padding: 2.5rem 2rem;
+      width: 360px;
+      max-width: 95vw;
+      text-align: center;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.4);
+    }
+    h1 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      margin: 0 0 1.5rem;
+      letter-spacing: 0.02em;
+      color: #a9a9b8;
+      text-transform: uppercase;
+    }
+    .phase-label {
+      font-size: 1rem;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      margin-bottom: 0.3rem;
+    }
+    .phase-label.work { color: #4caf6a; }
+    .phase-label.break { color: #4c9aef; }
+    .display {
+      font-size: 3.4rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      margin: 0.3rem 0 1rem;
+    }
+    .cycle {
+      color: #8b8b9a;
+      font-size: 0.95rem;
+      margin-bottom: 1.5rem;
+    }
+    .input-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.6rem;
+      margin-bottom: 0.8rem;
+    }
+    .input-row label {
+      font-size: 0.9rem;
+      color: #a9a9b8;
+    }
+    input[type="number"] {
+      width: 70px;
+      padding: 0.5rem;
+      border-radius: 8px;
+      border: 1px solid #3a3a46;
+      background: #14141a;
+      color: #f2f2f5;
+      font-size: 1rem;
+      text-align: center;
+    }
+    .buttons {
+      display: flex;
+      gap: 0.6rem;
+      margin-top: 1rem;
+    }
+    button {
+      flex: 1;
+      padding: 0.7rem 0.5rem;
+      border-radius: 10px;
+      border: none;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.05s ease, opacity 0.2s ease;
+    }
+    button:active { transform: scale(0.96); }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    #startBtn { background: #4caf6a; color: #08130c; }
+    #pauseBtn { background: #e0a83c; color: #1a1300; }
+    #resetBtn { background: #3a3a46; color: #f2f2f5; }
+    .status {
+      margin-top: 1.2rem;
+      font-size: 0.85rem;
+      color: #8b8b9a;
+      min-height: 1.2em;
+    }
+  </style>
+</head>
+<body>
+
+<div class="card">
+  <h1>Work / break timer</h1>
+
+  <div class="input-row">
+    <label for="workInput">Work (minutes)</label>
+    <input type="number" id="workInput" min="0.1" step="0.1" value="30">
+  </div>
+  <div class="input-row">
+    <label for="breakInput">Break (minutes)</label>
+    <input type="number" id="breakInput" min="0.1" step="0.1" value="5">
+  </div>
+
+  <div class="phase-label work" id="phaseLabel">Work</div>
+  <div class="display" id="display">30:00</div>
+  <div class="cycle" id="cycleCount">Cycle 1</div>
+
+  <div class="buttons">
+    <button id="startBtn">Start</button>
+    <button id="pauseBtn" disabled>Pause</button>
+    <button id="resetBtn" title="Double-tap to reset the cycle too">Reset</button>
+  </div>
+
+  <div class="status" id="status">Set your times and hit start.</div>
+</div>
+
+<script>
+// ========== PERSISTENT SETTINGS ==========
+const STORAGE_KEY = 'workBreakTimerSettings';
+
+function loadSettings() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
+    if (saved) {
+      if (saved.workMinutes) workInput.value = saved.workMinutes;
+      if (saved.breakMinutes) breakInput.value = saved.breakMinutes;
+    }
+  } catch (e) {
+    console.warn('Could not load settings', e);
+  }
+}
+
+function saveSettings() {
+  const settings = {
+    workMinutes: parseFloat(workInput.value) || 30,
+    breakMinutes: parseFloat(breakInput.value) || 5
+  };
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+}
+
+// ========== TIMER LOGIC (mostly original) ==========
+let phase = 'work'; // 'work' or 'break'
+let remaining = 0;
+let running = false;
+let intervalId = null;
+let cycles = 1;
+let endTime = null;
+
+const display = document.getElementById('display');
+const cycleCount = document.getElementById('cycleCount');
+const phaseLabel = document.getElementById('phaseLabel');
+const workInput = document.getElementById('workInput');
+const breakInput = document.getElementById('breakInput');
+const startBtn = document.getElementById('startBtn');
+const pauseBtn = document.getElementById('pauseBtn');
+const resetBtn = document.getElementById('resetBtn');
+const statusEl = document.getElementById('status');
+
+function secondsFor(p) {
+  const mins = p === 'work' ? parseFloat(workInput.value) : parseFloat(breakInput.value);
+  return Math.round((mins || 0) * 60);
+}
+
+function formatTime(sec) {
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+}
+
+function updateDisplay() {
+  display.textContent = formatTime(remaining);
+  cycleCount.textContent = 'Cycle ' + cycles;
+  phaseLabel.textContent = phase === 'work' ? 'Work' : 'Break';
+  phaseLabel.className = 'phase-label ' + phase;
+  const tag = phase === 'work' ? 'Work' : 'Break';
+  document.title = formatTime(remaining) + ' - ' + tag;
+}
+
+// Web Audio API buzzer
+let audioCtx = null;
+function ensureAudioCtx() {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  if (audioCtx.state === 'suspended') {
+    audioCtx.resume();
+  }
+}
+
+let keepAliveOsc = null;
+let keepAliveGain = null;
+function startKeepAlive() {
+  ensureAudioCtx();
+  if (keepAliveOsc) return;
+  keepAliveOsc = audioCtx.createOscillator();
+  keepAliveGain = audioCtx.createGain();
+  keepAliveGain.gain.value = 0.001;
+  keepAliveOsc.frequency.value = 30;
+  keepAliveOsc.connect(keepAliveGain);
+  keepAliveGain.connect(audioCtx.destination);
+  keepAliveOsc.start();
+}
+function stopKeepAlive() {
+  if (keepAliveOsc) {
+    try { keepAliveOsc.stop(); } catch (e) {}
+    keepAliveOsc.disconnect();
+    keepAliveGain.disconnect();
+    keepAliveOsc = null;
+    keepAliveGain = null;
+  }
+}
+
+function playBuzzer() {
+  ensureAudioCtx();
+  const now = audioCtx.currentTime;
+  const beepCount = 10;
+  const beepDur = 0.18;
+  const gap = 0.22;
+  for (let i = 0; i < beepCount; i++) {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'square';
+    osc.frequency.value = 880;
+    const start = now + i * gap;
+    const stop = start + beepDur;
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.exponentialRampToValueAtTime(0.5, start + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, stop);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start(start);
+    osc.stop(stop + 0.02);
+  }
+}
+
+function switchPhase() {
+  playBuzzer();
+  if (phase === 'work') {
+    phase = 'break';
+    statusEl.textContent = 'Buzzer! Break time.';
+  } else {
+    phase = 'work';
+    cycles++;
+    statusEl.textContent = 'Buzzer! Back to work.';
+  }
+  endTime = Date.now() + secondsFor(phase) * 1000;
+  remaining = secondsFor(phase);
+}
+
+function tick() {
+  if (!running) return;
+  let guard = 0;
+  while (Date.now() >= endTime && guard < 50) {
+    switchPhase();
+    guard++;
+  }
+  remaining = Math.max(0, Math.round((endTime - Date.now()) / 1000));
+  updateDisplay();
+}
+
+function startTimer() {
+  ensureAudioCtx();
+  if (running) return;
+  if (remaining <= 0) {
+    remaining = secondsFor(phase);
+  }
+  endTime = Date.now() + remaining * 1000;
+  running = true;
+  startBtn.disabled = true;
+  pauseBtn.disabled = false;
+  workInput.disabled = true;
+  breakInput.disabled = true;
+  statusEl.textContent = phase === 'work' ? 'Working...' : 'On break...';
+  startKeepAlive();
+  intervalId = setInterval(tick, 250);
+}
+
+function pauseTimer() {
+  if (!running) return;
+  remaining = Math.max(0, Math.round((endTime - Date.now()) / 1000));
+  running = false;
+  clearInterval(intervalId);
+  stopKeepAlive();
+  startBtn.disabled = false;
+  pauseBtn.disabled = true;
+  workInput.disabled = false;
+  breakInput.disabled = false;
+  statusEl.textContent = 'Paused.';
+}
+
+function resetTimer(resetCycle) {
+  running = false;
+  clearInterval(intervalId);
+  stopKeepAlive();
+  if (resetCycle) cycles = 1;
+  phase = 'work';
+  endTime = null;
+  remaining = secondsFor(phase);
+  startBtn.disabled = false;
+  pauseBtn.disabled = true;
+  workInput.disabled = false;
+  breakInput.disabled = false;
+  statusEl.textContent = resetCycle
+    ? 'Timer and cycle reset.'
+    : 'Timer reset (cycle kept). Double-tap Reset to reset the cycle too.';
+  updateDisplay();
+  document.title = 'Work/Break Timer';
+}
+
+// ========== EVENT LISTENERS ==========
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && running) {
+    tick();
+  }
+});
+
+[workInput, breakInput].forEach(inp => {
+  inp.addEventListener('change', () => {
+    saveSettings(); // Save whenever the user changes the values
+    if (!running) {
+      remaining = secondsFor(phase);
+      updateDisplay();
+    }
+  });
+});
+
+startBtn.addEventListener('click', startTimer);
+pauseBtn.addEventListener('click', pauseTimer);
+
+let lastResetTap = 0;
+resetBtn.addEventListener('click', () => {
+  const now = Date.now();
+  const isDouble = now - lastResetTap < 400;
+  lastResetTap = isDouble ? 0 : now;
+  resetTimer(isDouble);
+});
+
+// ========== INITIALIZE ==========
+loadSettings();                 // Load saved work/break times
+remaining = secondsFor(phase);
+updateDisplay();
+document.title = 'Work/Break Timer';
+
+// Register service worker for PWA / offline support
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js')
+    .then(() => console.log('Service Worker registered'))
+    .catch(err => console.log('SW registration failed:', err));
+}
+</script>
+
+</body>
+</html>
